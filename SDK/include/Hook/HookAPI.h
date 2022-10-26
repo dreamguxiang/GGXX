@@ -5,6 +5,8 @@
 #include <Windows.h>
 #include <Psapi.h>
 #include "Memory.h"
+#include "FMT/format.h"
+#include "FMT/chrono.h"
 
 #define INRANGE(x,a,b)   (x >= a && x <= b)
 #define GET_BYTE( x )    (GET_BITS(x[0]) << 4 | GET_BITS(x[1]))
@@ -142,6 +144,7 @@ inline uintptr_t FindSig(const char* szSignature) {
             firstMatch = 0;
         }
     }
+    //std::cout<< "cann't find "<< szSignature << std::endl;
     return 0;
 }
 
@@ -192,10 +195,17 @@ static __forceinline auto __imp_Call_Addr(void* Fn) {
 
 class THookRegister {
 public:
+    THookRegister(void* address, void* hook, void** org,const char* iname) {
+        auto ret = HookFunction(address, org, hook);
+        if (ret != 0) {
+           // printf("FailedToHook: %p\n", address);
+        }
+    }
+
     THookRegister(void* address, void* hook, void** org) {
         auto ret = HookFunction(address, org, hook);
         if (ret != 0) {
-            printf("FailedToHook: %p\n", address);
+            // printf("FailedToHook: %p\n", address);
         }
     }
 
@@ -209,7 +219,8 @@ public:
         THookRegister(sym, hookUnion.b, org);
     }
     template <typename T>
-    THookRegister(void* address, T hook, void** org) {
+    THookRegister(void* address, T hook, void** org,const char* iname) {
+        fmt::print(fmt::format("{:%H:%M:%S} [GGXX] Name: {}\t Base: {}\t FuncName: sub_14{:07X}\n\n", fmt::localtime(_time64(0)),iname,address,(uintptr_t)address - (uintptr_t)GetModuleHandleA(Utils::hModuleName) > 180000000000? 0: (uintptr_t)address - (uintptr_t)GetModuleHandleA(Utils::hModuleName)));
         union {
             T a;
             void* b;
@@ -225,33 +236,7 @@ struct THookTemplate;
 template <CHash, CHash>
 extern THookRegister THookRegisterTemplate;
 
-#define _TInstanceHook(class_inh, pclass, iname, sym, ret, ...)                              \
-    template <>                                                                              \
-    struct THookTemplate<do_hash(iname), do_hash2(iname)> class_inh {                        \
-        typedef ret (THookTemplate::*original_type)(__VA_ARGS__);                            \
-        static original_type& _original() {                                                  \
-            static original_type storage;                                                    \
-            return storage;                                                                  \
-        }                                                                                    \
-        template <typename... Params>                                                        \
-        static ret original(pclass* _this, Params&&... params) {                             \
-            return (((THookTemplate*)_this)->*_original())(std::forward<Params>(params)...); \
-        }                                                                                    \
-        ret _hook(__VA_ARGS__);                                                              \
-    };                                                                                       \
-    template <>                                                                              \
-    static THookRegister THookRegisterTemplate<do_hash(iname), do_hash2(iname)>{             \
-        sym, &THookTemplate<do_hash(iname), do_hash2(iname)>::_hook,                         \
-        (void**)&THookTemplate<do_hash(iname), do_hash2(iname)>::_original()};               \
-    ret THookTemplate<do_hash(iname), do_hash2(iname)>::_hook(__VA_ARGS__)
-
-#define _TInstanceDefHook(iname, sym, ret, type, ...) \
-    _TInstanceHook(                                   \
-        : public type, type, iname, sym, ret, VA_EXPAND(__VA_ARGS__))
-#define _TInstanceNoDefHook(iname, sym, ret, ...) \
-    _TInstanceHook(, void, iname, sym, ret, VA_EXPAND(__VA_ARGS__))
-
-#define _TStaticHook(pclass, iname, sym, ret, ...)                               \
+#define _TStaticHook(pclass, iname, sym, ret, ...) \
     template <>                                                                  \
     struct THookTemplate<do_hash(iname), do_hash2(iname)> pclass {               \
         typedef ret (*original_type)(__VA_ARGS__);                               \
@@ -268,7 +253,7 @@ extern THookRegister THookRegisterTemplate;
     template <>                                                                  \
     static THookRegister THookRegisterTemplate<do_hash(iname), do_hash2(iname)>{ \
         sym, &THookTemplate<do_hash(iname), do_hash2(iname)>::_hook,             \
-        (void**)&THookTemplate<do_hash(iname), do_hash2(iname)>::_original()};   \
+        (void**)&THookTemplate<do_hash(iname), do_hash2(iname)>::_original(),iname};   \
     ret THookTemplate<do_hash(iname), do_hash2(iname)>::_hook(__VA_ARGS__)
 
 #define _TStaticDefHook(iname, sym, ret, type, ...) \
@@ -277,7 +262,9 @@ extern THookRegister THookRegisterTemplate;
 #define _TStaticNoDefHook(iname, sym, ret, ...) \
     _TStaticHook(, iname, sym, ret, VA_EXPAND(__VA_ARGS__))
 
-#define SHook2(iname, ret, sig, ...) _TStaticNoDefHook(iname, (void*)FindSig(sig), ret, VA_EXPAND(__VA_ARGS__))
+
+#define SHook2(iname, ret, sig, ...) \
+_TStaticNoDefHook(iname, (void*)FindSig(sig), ret, VA_EXPAND(__VA_ARGS__))
 #define SHook(ret, sig, ...) SHook2(sig, ret, sig, VA_EXPAND(__VA_ARGS__))
 #define SStaticHook2(iname, ret, sig, type, ...) \
     _TStaticDefHook(iname, (void*)FindSig(sig), ret, type, VA_EXPAND(__VA_ARGS__))
